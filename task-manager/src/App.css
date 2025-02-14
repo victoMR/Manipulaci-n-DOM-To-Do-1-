@@ -1,0 +1,43 @@
+:root {
+    --primary-color: #1890ff;
+    --secondary-color: #52c41a;
+    --background-color: #1f1f1f;
+    --text-color: #e0e0e0;
+    --card-background: #2d2d2d;
+    --border-color: #444;
+}
+
+body {
+    background-color: var(--background-color);
+    color: var(--text-color);
+}
+
+.ant-layout {
+    background-color: var(--background-color);
+}
+
+.ant-menu-dark {
+    background-color: var(--card-background);
+}
+
+.ant-card {
+    background-color: var(--card-background);
+    border-color: var(--border-color);
+}
+
+.ant-input,
+.ant-input-password {
+    background-color: var(--card-background);
+    border-color: var(--border-color);
+    color: var(--text-color);
+}
+
+.ant-btn-primary {
+    background-color: var(--primary-color);
+    border-color: var(--primary-color);
+}
+
+.ant-btn-primary:hover {
+    background-color: #40a9ff;
+    border-color: #40a9ff;
+}
