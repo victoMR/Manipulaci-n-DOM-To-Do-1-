@@ -1,30 +1,38 @@
 package handlers
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"task-manager-backend/internal/database"
 	"task-manager-backend/internal/models"
 	"time"
 
+	"cloud.google.com/go/firestore"
 	"github.com/gin-gonic/gin"
-	"github.com/gocql/gocql"
+	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// CreateTaskRequest estructura para la creación de tareas
 type CreateTaskRequest struct {
-	Title       string `json:"title" binding:"required"`
-	Description string `json:"description" binding:"required"`
-	Status      string `json:"status" binding:"required"`
+	Title           string        `json:"title" binding:"required"`
+	Description     string        `json:"description" binding:"required"`
+	Status          string        `json:"status" binding:"required"`
+	TimeUntilFinish time.Duration `json:"time_until_finish"`
+	RemindMe        bool          `json:"remind_me"`
+	Category        string        `json:"category"`
 }
 
-// UpdateTaskRequest estructura para actualizar tareas
 type UpdateTaskRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
+	Title           string        `json:"title"`
+	Description     string        `json:"description"`
+	Status          string        `json:"status"`
+	TimeUntilFinish time.Duration `json:"time_until_finish"`
+	RemindMe        bool          `json:"remind_me"`
+	Category        string        `json:"category"`
 }
 
-// CreateTask maneja la creación de nuevas tareas
 func CreateTask(c *gin.Context) {
 	var req CreateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -32,37 +40,38 @@ func CreateTask(c *gin.Context) {
 		return
 	}
 
-	// Obtener el ID del usuario del contexto (establecido por el middleware de autenticación)
+	log.Printf("Datos de la tarea recibidos: %+v", req)
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
-	// Convertir userID a UUID
-	userUUID, err := gocql.ParseUUID(userID.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+	task := models.Task{
+		ID:              uuid.New().String(),
+		UserID:          userID.(string),
+		Title:           req.Title,
+		Description:     req.Description,
+		Status:          req.Status,
+		TimeUntilFinish: req.TimeUntilFinish,
+		RemindMe:        req.RemindMe,
+		Category:        req.Category,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+
+	// Validate task before saving
+	if !task.Validate() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task data"})
 		return
 	}
 
-	// Crear nueva tarea
-	task := &models.Task{
-		ID:          gocql.TimeUUID(),
-		UserID:      userUUID,
-		Title:       req.Title,
-		Description: req.Description,
-		Status:      req.Status,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
+	ctx := context.Background()
+	_, err := database.Client.Collection("tasks").Doc(task.ID).Set(ctx, task)
 
-	// Insertar tarea en la base de datos
-	if err := database.Session.Query(`
-		INSERT INTO tasks (id, user_id, title, description, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.UserID, task.Title, task.Description, task.Status, task.CreatedAt, task.UpdatedAt,
-	).Exec(); err != nil {
+	if err != nil {
+		log.Printf("Error creating task: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error creating task"})
 		return
 	}
@@ -70,7 +79,6 @@ func CreateTask(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"task": task})
 }
 
-// GetUserTasks obtiene todas las tareas del usuario
 func GetUserTasks(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -78,43 +86,29 @@ func GetUserTasks(c *gin.Context) {
 		return
 	}
 
-	userUUID, err := gocql.ParseUUID(userID.(string))
+	ctx := context.Background()
+	tasksRef := database.Client.Collection("tasks")
+	docs, err := tasksRef.Where("user_id", "==", userID.(string)).Documents(ctx).GetAll()
+
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-
-	// Consultar tareas del usuario
-	iter := database.Session.Query(`
-		SELECT id, user_id, title, description, status, created_at, updated_at
-		FROM tasks
-		WHERE user_id = ?`,
-		userUUID,
-	).Iter()
-
-	var tasks []models.Task
-	var task models.Task
-	for iter.Scan(
-		&task.ID,
-		&task.UserID,
-		&task.Title,
-		&task.Description,
-		&task.Status,
-		&task.CreatedAt,
-		&task.UpdatedAt,
-	) {
-		tasks = append(tasks, task)
-	}
-
-	if err := iter.Close(); err != nil {
+		log.Printf("Error fetching tasks: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching tasks"})
 		return
+	}
+
+	var tasks []models.Task
+	for _, doc := range docs {
+		var task models.Task
+		if err := doc.DataTo(&task); err != nil {
+			log.Printf("Error converting document to task: %v", err)
+			continue
+		}
+		tasks = append(tasks, task)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"tasks": tasks})
 }
 
-// UpdateTask actualiza una tarea existente
 func UpdateTask(c *gin.Context) {
 	taskID := c.Param("id")
 	userID, exists := c.Get("user_id")
@@ -129,35 +123,62 @@ func UpdateTask(c *gin.Context) {
 		return
 	}
 
-	taskUUID, err := gocql.ParseUUID(taskID)
+	ctx := context.Background()
+	taskRef := database.Client.Collection("tasks").Doc(taskID)
+
+	// Verify task exists and belongs to user
+	doc, err := taskRef.Get(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+		if status.Code(err) == codes.NotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching task"})
 		return
 	}
 
-	userUUID, err := gocql.ParseUUID(userID.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-
-	// Verificar que la tarea pertenece al usuario
 	var existingTask models.Task
-	if err := database.Session.Query(`
-		SELECT id FROM tasks WHERE id = ? AND user_id = ? ALLOW FILTERING`,
-		taskUUID, userUUID,
-	).Scan(&existingTask.ID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found or unauthorized"})
+	if err := doc.DataTo(&existingTask); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error parsing task data"})
 		return
 	}
 
-	// Actualizar la tarea
-	if err := database.Session.Query(`
-		UPDATE tasks
-		SET title = ?, description = ?, status = ?, updated_at = ?
-		WHERE id = ? AND user_id = ?`,
-		req.Title, req.Description, req.Status, time.Now(), taskUUID, userUUID,
-	).Exec(); err != nil {
+	if existingTask.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized to modify this task"})
+		return
+	}
+
+	updates := make(map[string]interface{})
+	updates["updated_at"] = time.Now()
+
+	if req.Title != "" {
+		updates["title"] = req.Title
+		existingTask.Title = req.Title
+	}
+	if req.Description != "" {
+		updates["description"] = req.Description
+		existingTask.Description = req.Description
+	}
+	if req.Status != "" {
+		updates["status"] = req.Status
+		existingTask.Status = req.Status
+	}
+	// Update new fields
+	updates["time_until_finish"] = req.TimeUntilFinish
+	updates["remind_me"] = req.RemindMe
+	if req.Category != "" {
+		updates["category"] = req.Category
+	}
+
+	// Validate updated task
+	if !existingTask.Validate() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task data"})
+		return
+	}
+
+	_, err = taskRef.Set(ctx, updates, firestore.MergeAll)
+	if err != nil {
+		log.Printf("Error updating task: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating task"})
 		return
 	}
@@ -165,7 +186,6 @@ func UpdateTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Task updated successfully"})
 }
 
-// DeleteTask elimina una tarea
 func DeleteTask(c *gin.Context) {
 	taskID := c.Param("id")
 	userID, exists := c.Get("user_id")
@@ -174,33 +194,34 @@ func DeleteTask(c *gin.Context) {
 		return
 	}
 
-	taskUUID, err := gocql.ParseUUID(taskID)
+	ctx := context.Background()
+	taskRef := database.Client.Collection("tasks").Doc(taskID)
+
+	// Verify task exists and belongs to user
+	doc, err := taskRef.Get(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+		if status.Code(err) == codes.NotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching task"})
 		return
 	}
 
-	userUUID, err := gocql.ParseUUID(userID.(string))
+	var task models.Task
+	if err := doc.DataTo(&task); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error parsing task data"})
+		return
+	}
+
+	if task.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized to delete this task"})
+		return
+	}
+
+	_, err = taskRef.Delete(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-
-	// Verificar que la tarea pertenece al usuario antes de eliminarla
-	var existingTask models.Task
-	if err := database.Session.Query(`
-		SELECT id FROM tasks WHERE id = ? AND user_id = ? ALLOW FILTERING`,
-		taskUUID, userUUID,
-	).Scan(&existingTask.ID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found or unauthorized"})
-		return
-	}
-
-	// Eliminar la tarea
-	if err := database.Session.Query(`
-		DELETE FROM tasks WHERE id = ? AND user_id = ?`,
-		taskUUID, userUUID,
-	).Exec(); err != nil {
+		log.Printf("Error deleting task: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error deleting task"})
 		return
 	}

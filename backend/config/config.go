@@ -1,25 +1,60 @@
+// config/config.go
 package config
 
 import (
-	"log"
+	"fmt"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
 
-// LoadEnv carga las variables de entorno desde un archivo .env
-func LoadEnv() {
-	// Cargar el archivo .env
-	if err := godotenv.Load(); err != nil {
-		log.Println("No .env file found, using environment variables directly.")
-	}
+type Config struct {
+    Firebase struct {
+        CredentialsPath string
+        ProjectID       string
+    }
+    Server struct {
+        Port            string
+        AllowedOrigins  []string
+        Environment     string
+    }
 }
 
-// GetEnv devuelve el valor de una variable de entorno o un valor por defecto si no existe
-func GetEnv(key, defaultValue string) string {
-	value := os.Getenv(key)
-	if value == "" {
-		return defaultValue
-	}
-	return value
+func LoadConfig() (*Config, error) {
+    if err := godotenv.Load(); err != nil {
+        // Only log as warning since this might be intentional in production
+        fmt.Println("Warning: No .env file found, using environment variables")
+    }
+
+    config := &Config{}
+
+    // Firebase configuration
+    config.Firebase.CredentialsPath = getRequiredEnv("GOOGLE_APPLICATION_CREDENTIALS")
+    config.Firebase.ProjectID = getRequiredEnv("PROJECT_ID")
+
+    // Server configuration
+    config.Server.Port = getEnvWithDefault("PORT", "8080")
+    config.Server.Environment = getEnvWithDefault("GIN_MODE", "debug")
+
+    // Handle CORS origins
+    originsStr := getEnvWithDefault("ALLOWED_ORIGINS", "http://localhost:5173")
+    config.Server.AllowedOrigins = strings.Split(originsStr, ",")
+
+    return config, nil
+}
+
+func getRequiredEnv(key string) string {
+    value := os.Getenv(key)
+    if value == "" {
+        panic(fmt.Sprintf("Required environment variable %s is not set", key))
+    }
+    return value
+}
+
+func getEnvWithDefault(key, defaultValue string) string {
+    if value := os.Getenv(key); value != "" {
+        return value
+    }
+    return defaultValue
 }

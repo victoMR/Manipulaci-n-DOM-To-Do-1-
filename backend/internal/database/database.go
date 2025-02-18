@@ -1,78 +1,112 @@
+// database/firestore.go
 package database
 
 import (
+	"context"
+	"fmt"
 	"log"
-	"strings"
-	"task-manager-backend/config"
 	"time"
 
-	"github.com/gocql/gocql"
+	"cloud.google.com/go/firestore"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-var Session *gocql.Session // Variable global para la sesión
+// Client is the global Firestore client
+var Client *firestore.Client
 
-func InitDB() *gocql.Session {
-	// Obtener configuración desde variables de entorno
-	hosts := strings.Split(config.GetEnv("SCYLLA_HOSTS", "127.0.0.1:9042"), ",")
-	username := config.GetEnv("SCYLLA_USERNAME", "")
-	password := config.GetEnv("SCYLLA_PASSWORD", "")
+// InitFirestore initializes the Firestore client
+func InitFirestore(ctx context.Context, projectID string, credsPath string) error {
+    var err error
 
-	cluster := gocql.NewCluster(hosts...)
-	cluster.Keyspace = "task_man"
-	cluster.Consistency = gocql.Quorum
-	cluster.Timeout = time.Second * 5
+    // Initialize Firestore client with retry logic
+    for attempts := 1; attempts <= 3; attempts++ {
+        Client, err = firestore.NewClient(ctx, projectID, option.WithCredentialsFile(credsPath))
+        if err == nil {
+            break
+        }
 
-	// Si hay usuario y contraseña, configurar autenticación
-	if username != "" && password != "" {
-		cluster.Authenticator = gocql.PasswordAuthenticator{
-			Username: username,
-			Password: password,
-		}
-	}
+        log.Printf("Attempt %d: Failed to connect to Firestore: %v", attempts, err)
+        if attempts < 3 {
+            time.Sleep(time.Second * time.Duration(attempts))
+        }
+    }
 
-	// Seleccionar política de hosts (opcional, pero recomendado en entornos distribuidos)
-	cluster.PoolConfig.HostSelectionPolicy = gocql.DCAwareRoundRobinPolicy("AWS_US_EAST_1")
+    if err != nil {
+        return fmt.Errorf("failed to initialize Firestore after 3 attempts: %v", err)
+    }
 
-	var err error
-	Session, err = cluster.CreateSession()
-	if err != nil {
-		log.Fatal("Error al conectar con ScyllaDB:", err)
-	}
+    // Test connection
+    if err := testConnection(ctx); err != nil {
+        if status.Code(err) != codes.NotFound {
+            Client.Close()
+            return fmt.Errorf("connection test failed: %v", err)
+        }
+        // NotFound is acceptable as it means we can connect but collection doesn't exist
+        log.Printf("Connection test returned NotFound - this is acceptable for new databases")
+    }
 
-	return Session
+    log.Println("Successfully connected to Firestore")
+    return nil
 }
 
-func CreateTables() error {
-	// Crear keyspace si no existe
-	if err := Session.Query(`CREATE KEYSPACE IF NOT EXISTS task_man
-		WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}`).Exec(); err != nil {
-		return err
-	}
+// testConnection verifies the Firestore connection
+func testConnection(ctx context.Context) error {
+    _, err := Client.Collection("test").Doc("test").Get(ctx)
+    if err != nil {
+        if status.Code(err) == codes.NotFound {
+            return nil // NotFound is acceptable
+        }
+        return err
+    }
+    return nil
+}
 
-	// Crear tabla de usuarios
-	if err := Session.Query(`CREATE TABLE IF NOT EXISTS task_man.users (
-		id uuid PRIMARY KEY,
-		username text,
-		email text,
-		password text,
-		created_at timestamp
-	)`).Exec(); err != nil {
-		return err
-	}
+// InitializeCollections ensures required collections exist
+func InitializeCollections(ctx context.Context) error {
+    collections := []string{"users", "tasks"}
 
-	// Crear tabla de tareas
-	if err := Session.Query(`CREATE TABLE IF NOT EXISTS task_man.tasks (
-		id uuid,
-		user_id uuid,
-		title text,
-		description text,
-		status text,
-		created_at timestamp,
-		updated_at timestamp,
-		PRIMARY KEY (user_id, id)
-	)`).Exec(); err != nil {
-		return err
-	}
+    for _, colName := range collections {
+        // Create a temporary document to initialize the collection
+        tempDoc := Client.Collection(colName).Doc("_init")
 
-	return nil
+        _, err := tempDoc.Set(ctx, map[string]interface{}{
+            "initialized": true,
+            "timestamp":   time.Now(),
+        })
+        if err != nil {
+            return fmt.Errorf("failed to initialize collection %s: %v", colName, err)
+        }
+
+        // Clean up the temporary document
+        _, err = tempDoc.Delete(ctx)
+        if err != nil {
+            log.Printf("Warning: Could not delete initialization document in %s: %v", colName, err)
+        }
+    }
+
+    return nil
+}
+
+// Collections returns all collection references needed by the application
+type Collections struct {
+    Users *firestore.CollectionRef
+    Tasks *firestore.CollectionRef
+}
+
+// GetCollections returns initialized collection references
+func GetCollections() *Collections {
+    return &Collections{
+        Users: Client.Collection("users"),
+        Tasks: Client.Collection("tasks"),
+    }
+}
+
+// Close closes the Firestore client
+func Close() error {
+    if Client != nil {
+        return Client.Close()
+    }
+    return nil
 }
