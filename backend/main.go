@@ -116,6 +116,7 @@ func main() {
 }
 
 // setupRoutes extracts route configuration for better organization
+// setupRoutes configura todas las rutas de la aplicación
 func setupRoutes(r *gin.Engine) {
 	api := r.Group("/api")
 
@@ -133,6 +134,9 @@ func setupRoutes(r *gin.Engine) {
 		// User routes
 		protected.GET("/user", handlers.GetUser)
 
+		// Buscar usuarios por correo electrónico
+		protected.GET("/users/search", handlers.SearchUser)
+
 		// Task routes
 		tasks := protected.Group("/tasks")
 		{
@@ -140,6 +144,16 @@ func setupRoutes(r *gin.Engine) {
 			tasks.POST("", handlers.CreateTask)
 			tasks.PUT("/:id", handlers.UpdateTask)
 			tasks.DELETE("/:id", handlers.DeleteTask)
+		}
+		// Group routes
+		groupHandler := handlers.NewGroupHandler()
+		groups := protected.Group("/groups")
+		{
+			groups.GET("", groupHandler.GetAllGroupsHandler)
+			groups.POST("", groupHandler.CreateGroupHandler)
+			groups.GET("/:id", groupHandler.GetGroupHandler)
+			groups.POST("/:id/members/:user_id", groupHandler.AddMemberHandler)
+			groups.DELETE("/:id/members/:user_id", groupHandler.RemoveMemberHandler)
 		}
 	}
 }

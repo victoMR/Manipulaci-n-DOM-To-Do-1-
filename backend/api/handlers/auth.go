@@ -26,6 +26,7 @@ type RegisterRequest struct {
 	Username string `json:"username" binding:"required"`
 	Email    string `json:"email" binding:"required"`
 	Password string `json:"password" binding:"required"`
+	Role     string `json:"role" binding:"required"`
 }
 
 func Register(c *gin.Context) {
@@ -66,6 +67,7 @@ func Register(c *gin.Context) {
 		Username:  req.Username,
 		Email:     req.Email,
 		Password:  string(hashedPassword),
+		Role:      req.Role,
 		CreatedAt: time.Now(),
 	}
 
@@ -75,6 +77,7 @@ func Register(c *gin.Context) {
 		"username":   user.Username,
 		"email":      user.Email,
 		"password":   user.Password,
+		"role":       user.Role,
 		"created_at": user.CreatedAt,
 	})
 
@@ -134,7 +137,12 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"token": tokenString})
+	// Devuelve el token, username y role
+	c.JSON(http.StatusOK, gin.H{
+		"token":    tokenString,
+		"username": userData["username"].(string),
+		"role":     userData["role"].(string),
+	})
 }
 
 func GetUser(c *gin.Context) {
@@ -160,8 +168,57 @@ func GetUser(c *gin.Context) {
 		ID:        userData["id"].(string),
 		Username:  userData["username"].(string),
 		Email:     userData["email"].(string),
+		Role:      userData["role"].(string),
 		CreatedAt: userData["created_at"].(time.Time),
 	}
 
 	c.JSON(http.StatusOK, gin.H{"user": user})
+}
+
+// SearchUser busca usuarios por correo electrónico
+func SearchUser(c *gin.Context) {
+	email := c.Query("email") // Obtener el correo electrónico de la query string
+	if email == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Email is required"})
+		return
+	}
+
+	ctx := context.Background()
+	usersRef := database.Client.Collection("users")
+
+	// Buscar usuarios por correo electrónico
+	docs, err := usersRef.Where("email", "==", email).Documents(ctx).GetAll()
+	if err != nil {
+		log.Println("Database error (query):", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error searching user"})
+		return
+	}
+
+	if len(docs) == 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "No users found"})
+		return
+	}
+
+	// Mapear los resultados a un slice de usuarios
+	var users []models.User
+	for _, doc := range docs {
+		userData := doc.Data()
+
+		// Verificar si el campo "role" existe y no está vacío
+		role, ok := userData["role"].(string)
+		if !ok || role == "" {
+			role = "user" // Valor por defecto si el campo no existe o está vacío
+		}
+
+		user := models.User{
+			ID:        userData["id"].(string),
+			Username:  userData["username"].(string),
+			Email:     userData["email"].(string),
+			Role:      role, // Usar el valor verificado
+			CreatedAt: userData["created_at"].(time.Time),
+		}
+		users = append(users, user)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"users": users})
 }

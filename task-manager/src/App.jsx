@@ -6,6 +6,7 @@ import DashboardPage from './pages/Dashboard/DashboardPage';
 import TasksPage from './pages/Tasks/TasksPage';
 import ProfilePage from './pages/Profile/ProfilePage';
 import SettingsPage from './pages/Settings/SettingsPage';
+import GroupsPage from './pages/Groups/GroupsPage';
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
       <Route path="/tasks" element={<TasksPage />} />
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/groups" element={<GroupsPage />} />
     </Routes>
   );
 }

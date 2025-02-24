@@ -1,4 +1,3 @@
-// database/firestore.go
 package database
 
 import (
@@ -8,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/google/uuid"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -109,4 +109,9 @@ func Close() error {
         return Client.Close()
     }
     return nil
+}
+
+// GenerateID genera un ID único usando UUID
+func GenerateID() string {
+    return uuid.New().String()
 }

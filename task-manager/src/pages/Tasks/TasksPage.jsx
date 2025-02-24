@@ -19,7 +19,9 @@ import {
   Tooltip,
   Badge,
   Space,
-  Divider
+  Divider,
+  Radio,
+  Avatar
 } from 'antd';
 import {
   PlusOutlined,
@@ -30,7 +32,10 @@ import {
   SearchOutlined,
   ClockCircleOutlined,
   BellOutlined,
-  FolderOutlined
+  FolderOutlined,
+  TeamOutlined,
+  UserOutlined,
+  UserAddOutlined
 } from '@ant-design/icons';
 
 const { Title, Text } = Typography;
@@ -46,6 +51,18 @@ const TasksPage = () => {
   const [form] = Form.useForm();
   const [searchTerm, setSearchTerm] = useState('');
   const [filterCategory, setFilterCategory] = useState('all');
+  const [userRole, setUserRole] = useState('');
+  const [userGroups, setUserGroups] = useState([]);
+  const [selectedGroup, setSelectedGroup] = useState(null);
+  const [groupMembers, setGroupMembers] = useState([]);
+  const [loadingGroups, setLoadingGroups] = useState(false);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [assignmentType, setAssignmentType] = useState('personal');
+  const [userData, setUserData] = useState(null);
+  const [collaborators, setCollaborators] = useState([]);
+  const [searchEmail, setSearchEmail] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchLoading, setSearchLoading] = useState(false);
 
   const categories = [
     'work',
@@ -56,6 +73,34 @@ const TasksPage = () => {
     'other'
   ];
 
+  const API_BASE_URL = 'http://localhost:8080/api';
+
+  const getAuthHeaders = () => ({
+    headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+  });
+
+  // Fetch user data on component mount
+  useEffect(() => {
+    const getUserData = async () => {
+      try {
+        const response = await axios.get(
+          `${API_BASE_URL}/user`,
+          getAuthHeaders()
+        );
+        setUserData(response.data);
+        setUserRole(response.data.role || '');
+      } catch (error) {
+        console.error('Error fetching user data:', error);
+      }
+    };
+
+    getUserData();
+    fetchTasks();
+    if (localStorage.getItem('token')) {
+      fetchUserGroups();
+    }
+  }, []);
+
   const fetchTasks = async () => {
     setLoading(true);
     try {
@@ -64,15 +109,56 @@ const TasksPage = () => {
         message.error('No se encontró token. Por favor, inicia sesión.');
         return;
       }
-      const response = await axios.get('http://localhost:8080/api/tasks', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const response = await axios.get(`${API_BASE_URL}/tasks`, getAuthHeaders());
       setTasks(response.data?.tasks ?? []);
     } catch (error) {
       message.error(`Error al obtener tareas: ${error.response?.data?.message || error.message}`);
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchUserGroups = async () => {
+    setLoadingGroups(true);
+    try {
+      const response = await axios.get(`${API_BASE_URL}/groups`, getAuthHeaders());
+      setUserGroups(response.data?.groups ?? []);
+    } catch (error) {
+      console.error('Error fetching user groups:', error);
+    } finally {
+      setLoadingGroups(false);
+    }
+  };
+
+  const fetchGroupMembers = async (groupId) => {
+    if (!groupId) return;
+
+    setLoadingMembers(true);
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/groups/${groupId}`,
+        getAuthHeaders()
+      );
+
+      if (response.data && response.data.members) {
+        setGroupMembers(response.data.members);
+      } else if (response.data && response.data.group && response.data.group.members) {
+        setGroupMembers(response.data.group.members);
+      } else {
+        setGroupMembers([]);
+      }
+    } catch (error) {
+      console.error('Error fetching group members:', error);
+      message.error('Error al cargar los miembros del grupo');
+    } finally {
+      setLoadingMembers(false);
+    }
+  };
+
+  const handleGroupChange = (value) => {
+    const group = userGroups.find(g => g.id === value);
+    setSelectedGroup(group);
+    fetchGroupMembers(value);
   };
 
   const handleSaveTask = async (values) => {
@@ -90,24 +176,33 @@ const TasksPage = () => {
       status: values.status,
       time_until_finish: values.time_until_finish ? Number(values.time_until_finish * 3600000000000) : 0,
       remind_me: Boolean(values.remind_me),
+      assigned_by: userData?.username || '',
+      arr_collaborators: collaborators.map(c => c.id), // Agregar colaboradores
     };
+
+    // Add group and assignee data if task is not personal
+    if (values.assignment_type === 'group') {
+      taskData.group_id = values.group_id;
+      taskData.is_group_task = true;
+    } else if (values.assignment_type === 'member') {
+      taskData.group_id = values.group_id;
+      taskData.assigned_to = values.assigned_to;
+      taskData.is_group_task = false;
+    }
 
     console.log('Datos de la tarea a guardar:', taskData);
 
     try {
       if (editingTask) {
-        await axios.put(`http://localhost:8080/api/tasks/${editingTask.id}`, taskData, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        await axios.put(`${API_BASE_URL}/tasks/${editingTask.id}`, taskData, getAuthHeaders());
         message.success('¡Tarea actualizada con éxito!');
       } else {
-        await axios.post('http://localhost:8080/api/tasks', taskData, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        await axios.post(`${API_BASE_URL}/tasks`, taskData, getAuthHeaders());
         message.success('¡Tarea creada con éxito!');
       }
       setIsModalVisible(false);
       form.resetFields();
+      setCollaborators([]); // Limpiar colaboradores después de guardar
       fetchTasks();
     } catch (error) {
       message.error(`Error al guardar la tarea: ${error.response?.data?.message || error.message}`);
@@ -124,9 +219,7 @@ const TasksPage = () => {
       onOk: async () => {
         const token = localStorage.getItem('token');
         try {
-          await axios.delete(`http://localhost:8080/api/tasks/${taskId}`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          await axios.delete(`${API_BASE_URL}/tasks/${taskId}`, getAuthHeaders());
           message.success('¡Tarea eliminada con éxito!');
           fetchTasks();
         } catch (error) {
@@ -143,9 +236,10 @@ const TasksPage = () => {
       return;
     }
     try {
-      await axios.put(`http://localhost:8080/api/tasks/${task.id}`,
+      await axios.put(
+        `${API_BASE_URL}/tasks/${task.id}`,
         { ...task, status: 'completed' },
-        { headers: { Authorization: `Bearer ${token}` } }
+        getAuthHeaders()
       );
       message.success('¡Tarea marcada como completada!');
       fetchTasks();
@@ -155,9 +249,12 @@ const TasksPage = () => {
   };
 
   const getTimeUntilFinishText = (nanoseconds, createdAt) => {
+    if (!nanoseconds || nanoseconds <= 0) return { text: '', color: '' };
+
     const remainingTime = nanoseconds / 1000000; // Convertir nanosegundos a milisegundos
     const currentTime = new Date().getTime(); // Tiempo actual en milisegundos
-    const timeLeft = remainingTime - (currentTime - new Date(createdAt).getTime());
+    const createTime = new Date(createdAt || Date.now()).getTime();
+    const timeLeft = remainingTime - (currentTime - createTime);
 
     if (timeLeft <= 0) {
       return { text: 'Caducado', color: 'red' }; // Estado caducado
@@ -174,20 +271,126 @@ const TasksPage = () => {
     return { text: `${Math.round(days)} días`, color: 'green' }; // Más de un día
   };
 
-
   const showModal = (task = null) => {
     setEditingTask(task);
+
+    // Reset form fields
+    form.resetFields();
+
     if (task) {
       // Convert nanoseconds to hours for display
-      const timeInHours = task.time_until_finish / 3600000000000
-      form.setFieldsValue({
+      const timeInHours = task.time_until_finish / 3600000000000;
+
+      const formValues = {
         ...task,
-        time_until_finish: timeInHours
-      });
+        time_until_finish: timeInHours,
+      };
+
+      // Handle assignment type for editing
+      if (task.is_group_task && task.group_id) {
+        formValues.assignment_type = 'group';
+        formValues.group_id = task.group_id;
+        handleGroupChange(task.group_id);
+      } else if (task.assigned_to && task.group_id) {
+        formValues.assignment_type = 'member';
+        formValues.group_id = task.group_id;
+        formValues.assigned_to = task.assigned_to;
+        handleGroupChange(task.group_id);
+      } else {
+        formValues.assignment_type = 'personal';
+      }
+
+      form.setFieldsValue(formValues);
+      setAssignmentType(formValues.assignment_type);
+
+      // Load collaborators' names
+      if (task.arr_collaborators && task.arr_collaborators.length > 0) {
+        fetchCollaborators(task.arr_collaborators);
+      }
     } else {
-      form.resetFields();
+      setAssignmentType('personal');
+      setCollaborators([]); // Limpiar colaboradores para nueva tarea
     }
+
     setIsModalVisible(true);
+  };
+
+  const fetchCollaborators = async (collaboratorIds) => {
+    try {
+      const response = await axios.post(
+        `${API_BASE_URL}/users/batch`,
+        { ids: collaboratorIds },
+        getAuthHeaders()
+      );
+
+      if (response.data && response.data.users) {
+        setCollaborators(response.data.users);
+      }
+    } catch (error) {
+      console.error('Error fetching collaborators:', error);
+    }
+  };
+
+  const handleAssignmentTypeChange = (e) => {
+    const value = e.target.value;
+    setAssignmentType(value);
+
+    // If no longer using group assignment, clear group-related fields
+    if (value === 'personal') {
+      form.setFieldsValue({
+        group_id: undefined,
+        assigned_to: undefined
+      });
+      setSelectedGroup(null);
+      setGroupMembers([]);
+    }
+  };
+
+  const handleSearchCollaborators = async () => {
+    if (!searchEmail.trim()) {
+      message.warning('Por favor, ingresa un correo electrónico');
+      return;
+    }
+
+    setSearchLoading(true);
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/users/search?email=${encodeURIComponent(searchEmail)}`,
+        getAuthHeaders()
+      );
+
+      if (response.data.users && response.data.users.length > 0) {
+        setSearchResults(response.data.users);
+      } else {
+        setSearchResults([]);
+        message.info('No se encontró ningún usuario con ese correo electrónico');
+      }
+    } catch (error) {
+      console.error('Error searching user:', error);
+      message.error('Error al buscar el usuario');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  const handleAddCollaborator = (user) => {
+    if (collaborators.length >= 3) {
+      message.warning('Solo puedes agregar hasta 3 colaboradores');
+      return;
+    }
+
+    if (collaborators.some(c => c.id === user.id)) {
+      message.warning('Este usuario ya es un colaborador');
+      return;
+    }
+
+    setCollaborators([...collaborators, user]);
+    setSearchEmail('');
+    setSearchResults([]);
+  };
+
+  const handleRemoveCollaborator = (userId) => {
+    setCollaborators(collaborators.filter(c => c.id !== userId));
   };
 
   const filteredTasks = tasks.filter((task) => {
@@ -195,10 +398,6 @@ const TasksPage = () => {
     const matchesCategory = filterCategory === 'all' || task.category === filterCategory;
     return matchesSearch && matchesCategory;
   });
-
-  useEffect(() => {
-    fetchTasks();
-  }, []);
 
   const getStatusColor = (status) => {
     switch (status) {
@@ -222,6 +421,11 @@ const TasksPage = () => {
         <div style={{ marginBottom: '24px' }}>
           <Title level={2}>Gestión de Tareas</Title>
           <Text type="secondary">Organiza y mantén un seguimiento de todas tus tareas</Text>
+          {userRole === 'master' && (
+            <Tag color="gold" style={{ marginLeft: '8px' }}>
+              Administrador
+            </Tag>
+          )}
         </div>
 
         <Space style={{ marginBottom: '24px' }} wrap>
@@ -282,7 +486,16 @@ const TasksPage = () => {
                     ]}
                   >
                     <Card.Meta
-                      title={task.title}
+                      title={
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span>{task.title}</span>
+                          {(task.is_group_task || task.assigned_to) && (
+                            <Tag color="purple" icon={task.is_group_task ? <TeamOutlined /> : <UserOutlined />}>
+                              {task.is_group_task ? 'Grupal' : 'Asignada'}
+                            </Tag>
+                          )}
+                        </div>
+                      }
                       description={
                         <Space direction="vertical" size="small" style={{ width: '100%' }}>
                           <Text>{task.description}</Text>
@@ -293,15 +506,52 @@ const TasksPage = () => {
                             </Tag>
                             {task.remind_me && (
                               <Tag icon={<BellOutlined />} color="gold">
-                                Recordatorio activo
+                                Recordatorio
                               </Tag>
                             )}
                             {task.time_until_finish > 0 && (
-                              <Tag icon={<ClockCircleOutlined />} color={getTimeUntilFinishText(task.time_until_finish, task.createdAt).color}>
+                              <Tag
+                                icon={<ClockCircleOutlined />}
+                                color={getTimeUntilFinishText(task.time_until_finish, task.created_at).color}
+                              >
                                 {getTimeUntilFinishText(task.time_until_finish, task.created_at).text}
                               </Tag>
                             )}
                           </Space>
+
+                          {/* Assignment information */}
+                          {(task.assigned_by || task.assigned_to) && (
+                            <>
+                              <Divider style={{ margin: '8px 0' }} />
+                              <Space wrap>
+                                {task.assigned_by && (
+                                  <Text type="secondary">
+                                    Asignado por: <Text strong>{task.assigned_by}</Text>
+                                  </Text>
+                                )}
+                                {task.assigned_to && (
+                                  <Text type="secondary">
+                                    Asignado a: <Text strong>{task.assigned_to}</Text>
+                                  </Text>
+                                )}
+                              </Space>
+                            </>
+                          )}
+
+                          {/* Collaborators */}
+                          {task.arr_collaborators && task.arr_collaborators.length > 0 && (
+                            <>
+                              <Divider style={{ margin: '8px 0' }} />
+                              <Text type="secondary">Colaboradores:</Text>
+                              <Space wrap>
+                                {task.arr_collaborators.map((collaborator, index) => (
+                                  <Tag key={index} color="cyan">
+                                    {collaborator.username || collaborator}
+                                  </Tag>
+                                ))}
+                              </Space>
+                            </>
+                          )}
                         </Space>
                       }
                     />
@@ -319,6 +569,9 @@ const TasksPage = () => {
           open={isModalVisible}
           onCancel={() => {
             setIsModalVisible(false);
+            setSelectedGroup(null);
+            setGroupMembers([]);
+            setCollaborators([]); // Limpiar colaboradores al cerrar el modal
             form.resetFields();
           }}
           footer={null}
@@ -332,7 +585,8 @@ const TasksPage = () => {
               status: 'pending',
               remind_me: false,
               category: 'other',
-              time_until_finish: 0
+              time_until_finish: 0,
+              assignment_type: 'personal'
             }}
           >
             <Form.Item
@@ -393,6 +647,144 @@ const TasksPage = () => {
               <Switch />
             </Form.Item>
 
+            {/* Assignment section - only visible for master role */}
+            {userRole === 'master' && (
+              <>
+                <Divider>Asignación de Tarea</Divider>
+
+                <Form.Item
+                  name="assignment_type"
+                  label="Tipo de asignación"
+                >
+                  <Radio.Group onChange={handleAssignmentTypeChange} value={assignmentType}>
+                    <Radio value="personal">Personal</Radio>
+                    <Radio value="group">Grupo completo</Radio>
+                    <Radio value="member">Miembro específico</Radio>
+                  </Radio.Group>
+                </Form.Item>
+
+                {(assignmentType === 'group' || assignmentType === 'member') && (
+                  <Form.Item
+                    name="group_id"
+                    label="Seleccionar grupo"
+                    rules={[{ required: true, message: 'Por favor selecciona un grupo' }]}
+                  >
+                    <Select
+                      loading={loadingGroups}
+                      placeholder="Selecciona un grupo"
+                      onChange={handleGroupChange}
+                    >
+                      {userGroups.map(group => (
+                        <Option key={group.id} value={group.id}>
+                          {group.name}
+                        </Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                )}
+
+                {assignmentType === 'member' && selectedGroup && (
+                  <Form.Item
+                    name="assigned_to"
+                    label="Asignar a miembro"
+                    rules={[{ required: true, message: 'Por favor selecciona un miembro' }]}
+                  >
+                    <Select
+                      loading={loadingMembers}
+                      placeholder="Selecciona un miembro"
+                      notFoundContent={
+                        groupMembers.length === 0
+                          ? "No hay miembros en este grupo"
+                          : "No se encontraron miembros"
+                      }
+                    >
+                      {groupMembers.map(member => (
+                        <Option key={member.id} value={member.username}>
+                          <Space>
+                            <Avatar size="small">{member.username.charAt(0).toUpperCase()}</Avatar>
+                            {member.username}
+                          </Space>
+                        </Option>
+                      ))}
+                    </Select>
+                  </Form.Item>
+                )}
+              </>
+            )}
+
+            {/* Collaborators section */}
+            <Divider>Colaboradores</Divider>
+            <Form.Item label="Agregar colaboradores">
+              <Space>
+                <Input
+                  placeholder="Buscar usuario por correo electrónico"
+                  value={searchEmail}
+                  onChange={(e) => setSearchEmail(e.target.value)}
+                  prefix={<SearchOutlined />}
+                  onPressEnter={handleSearchCollaborators}
+                  disabled={searchLoading}
+                  style={{ width: '250px' }}
+                />
+                <Button
+                  type="primary"
+                  onClick={handleSearchCollaborators}
+                  loading={searchLoading}
+                  icon={<SearchOutlined />}
+                >
+                  Buscar
+                </Button>
+              </Space>
+            </Form.Item>
+
+            {searchResults.length > 0 && (
+              <List
+                dataSource={searchResults}
+                renderItem={(user) => (
+                  <List.Item
+                    key={user.id}
+                    actions={[
+                      <Button
+                        key={`add-${user.id}`}
+                        type="primary"
+                        icon={<UserAddOutlined />}
+                        onClick={() => handleAddCollaborator(user)}
+                        disabled={collaborators.length >= 3}
+                      >
+                        Agregar
+                      </Button>
+                    ]}
+                  >
+                    <List.Item.Meta
+                      avatar={
+                        <Avatar style={{ backgroundColor: '#1890ff' }}>
+                          {user.username ? user.username.charAt(0).toUpperCase() : user.email.charAt(0).toUpperCase()}
+                        </Avatar>
+                      }
+                      title={user.username}
+                      description={user.email}
+                    />
+                  </List.Item>
+                )}
+                style={{ marginBottom: '24px' }}
+              />
+            )}
+
+            {collaborators.length > 0 && (
+              <Form.Item label="Colaboradores seleccionados">
+                <Space wrap>
+                  {collaborators.map((collaborator) => (
+                    <Tag
+                      key={collaborator.id}
+                      closable
+                      onClose={() => handleRemoveCollaborator(collaborator.id)}
+                    >
+                      {collaborator.username}
+                    </Tag>
+                  ))}
+                </Space>
+              </Form.Item>
+            )}
+
             <Form.Item>
               <Space>
                 <Button type="primary" htmlType="submit" loading={saving}>
@@ -400,6 +792,9 @@ const TasksPage = () => {
                 </Button>
                 <Button onClick={() => {
                   setIsModalVisible(false);
+                  setSelectedGroup(null);
+                  setGroupMembers([]);
+                  setCollaborators([]);
                   form.resetFields();
                 }}>
                   Cancelar

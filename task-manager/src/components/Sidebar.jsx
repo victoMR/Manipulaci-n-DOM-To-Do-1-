@@ -1,34 +1,67 @@
 import { Tooltip } from 'antd';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { HomeOutlined, CheckCircleOutlined, UserOutlined, LogoutOutlined } from '@ant-design/icons';
+import { HomeOutlined, CheckCircleOutlined, UserOutlined, LogoutOutlined, TeamOutlined } from '@ant-design/icons';
 import { useEffect, useState, useMemo } from 'react';
 
-const menuItems = [
-  { key: '1', icon: <HomeOutlined />, label: 'Dashboard', path: '/dashboard' },
-  { key: '2', icon: <CheckCircleOutlined />, label: 'Tasks', path: '/tasks' },
-  { key: '3', icon: <UserOutlined />, label: 'Profile', path: '/profile' },
-  { key: '4', icon: <LogoutOutlined />, label: 'Log Out', path: '/logOut' }
-];
+// Dynamic menu items based on user role
+const getMenuItems = (role) => {
+  const items = [
+    { key: '1', icon: <HomeOutlined />, label: 'Dashboard', path: '/dashboard' },
+    { key: '2', icon: <CheckCircleOutlined />, label: 'Tasks', path: '/tasks' },
+    { key: '3', icon: <UserOutlined />, label: 'Profile', path: '/profile' },
+  ];
+
+  // Add Groups menu item for master role
+  if (role === 'master') {
+    items.splice(3, 0, { key: '4', icon: <TeamOutlined />, label: 'Groups', path: '/groups' });
+  }
+
+  // Logout is always the last item, key changes based on presence of Groups
+  items.push({
+    key: role === 'master' ? '5' : '4',
+    icon: <LogoutOutlined />,
+    label: 'Log Out',
+    path: '/logOut'
+  });
+
+  return items;
+};
 
 const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const [selectedKey, setSelectedKey] = useState('1');
   const [hoveredKey, setHoveredKey] = useState(null);
+  const [userRole, setUserRole] = useState(null);
 
   // Determine if the device is mobile based on window width
   const isMobile = useMemo(() => window.innerWidth < 768, []);
 
-  const routeToKeyMap = useMemo(() => ({
-    '/dashboard': '1',
-    '/tasks': '2',
-    '/profile': '3',
-    '/logOut': '4',
-  }), []);
+  // Get menu items based on user role
+  const menuItems = useMemo(() => getMenuItems(userRole), [userRole]);
+
+  // Build route to key map dynamically based on menu items
+  const routeToKeyMap = useMemo(() => {
+    const map = {};
+    menuItems.forEach(item => {
+      map[item.path] = item.key;
+    });
+    return map;
+  }, [menuItems]);
+
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    localStorage.removeItem('role'); // Cambia 'userRole' por 'role'
     navigate('/login');
   };
+
+  // Check user role on component mount
+  useEffect(() => {
+    // Get user role from localStorage
+    const role = localStorage.getItem('role'); // Cambia 'userRole' por 'role'
+    setUserRole(role);
+  }, []);
 
   useEffect(() => {
     const key = routeToKeyMap[location.pathname];
@@ -92,6 +125,7 @@ const Sidebar = () => {
           }}
           onMouseEnter={() => setHoveredKey('logo')}
           onMouseLeave={() => setHoveredKey(null)}
+          onClick={() => navigate('/dashboard')}
         >
           <span style={{
             fontSize: '18px',
@@ -108,7 +142,7 @@ const Sidebar = () => {
           placement={isMobile ? "top" : "right"}
           mouseEnterDelay={0.3}
         >
-          {item.key === '4' ? (
+          {item.label === 'Log Out' ? (
             <div
               onClick={handleLogout}
               style={{ textDecoration: 'none', width: isMobile ? 'auto' : '100%' }}

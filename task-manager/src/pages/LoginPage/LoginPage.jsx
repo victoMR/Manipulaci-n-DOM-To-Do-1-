@@ -6,6 +6,9 @@ import { useNavigate } from 'react-router-dom';
 
 const { Title, Text } = Typography;
 
+const API_BASE_URL = 'http://localhost:8080/api';
+const API_BASE_URL_HEALTH = 'http://localhost:8080';
+
 const LoginPage = () => {
   const [loading, setLoading] = useState(false);
   const [form] = Form.useForm();
@@ -15,14 +18,35 @@ const LoginPage = () => {
   const onFinish = async (values) => {
     setLoading(true);
     try {
-      const response = await axios.post('http://localhost:8080/api/auth/login', values);
+      // Envía solo el username y el password
+      const payload = {
+        username: values.username,
+        password: values.password,
+      };
+
+      const response = await axios.post(`${API_BASE_URL}/auth/login`, payload, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      console.log('Response from backend:', response.data); // Verifica la respuesta
+
+      // Guarda el token, username y role en localStorage
       localStorage.setItem('token', response.data.token);
       localStorage.setItem('username', response.data.username);
+      localStorage.setItem('role', response.data.role);
+
       message.success('¡Inicio de sesión exitoso!');
       navigate('/dashboard');
     } catch (error) {
-      message.error('Error al iniciar sesión. Verifica tus credenciales.');
-      console.error('Login error:', error);
+      if (error.response) {
+        console.error('Error response:', error.response.data);
+        message.error(`Error al iniciar sesión: ${error.response.data.error || 'Credenciales incorrectas'}`);
+      } else {
+        console.error('Error:', error.message);
+        message.error('Ocurrió un error inesperado. Inténtalo de nuevo.');
+      }
     } finally {
       setLoading(false);
     }
@@ -30,7 +54,7 @@ const LoginPage = () => {
 
   const checkHealth = async () => {
     try {
-      const response = await axios.get('http://localhost:8080/health');
+      const response = await axios.get(`${API_BASE_URL_HEALTH}/health`);
       setHealthStatus(response.data);
     } catch (error) {
       console.error('Health check error:', error);

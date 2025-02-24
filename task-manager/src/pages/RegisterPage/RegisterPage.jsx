@@ -3,6 +3,8 @@ import { Button, Form, Input, message, Card, Typography } from 'antd';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 
+const API_BASE_URL = 'http://localhost:8080/api';
+
 const RegisterPage = () => {
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
@@ -41,7 +43,10 @@ const RegisterPage = () => {
   const onFinish = async (values) => {
     setLoading(true);
     try {
-      const response = await axios.post('http://localhost:8080/api/auth/register', values, {
+      // Agregar el campo "role" con el valor "user" (o el que desees)
+      const payload = { ...values, role: 'master' }; // Aquí defines el rol
+
+      const response = await axios.post(`${API_BASE_URL}/auth/register`, payload, {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -51,13 +56,10 @@ const RegisterPage = () => {
       navigate('/login');
     } catch (error) {
       if (error.response) {
-        // El servidor respondió con un código de estado fuera del rango 2xx
         message.error(`Fallo en el registro: ${error.response.data.error}`);
       } else if (error.request) {
-        // La solicitud fue hecha pero no se recibió respuesta
         message.error('No se recibió respuesta del servidor. Por favor, inténtalo de nuevo.');
       } else {
-        // Algo sucedió al configurar la solicitud
         message.error('Ocurrió un error. Por favor, inténtalo de nuevo.');
       }
       console.error('Error en el registro:', error);
@@ -77,7 +79,12 @@ const RegisterPage = () => {
         <Typography.Title level={2} style={{ textAlign: 'center', marginBottom: '30px' }}>
           Registro
         </Typography.Title>
-        <Form form={form} onFinish={onFinish} layout="vertical">
+        <Form form={form} onFinish={onFinish} layout="vertical" initialValues={{ role: 'user' }}>
+          {/* Campo oculto para el rol */}
+          <Form.Item name="role" style={{ display: 'none' }}>
+            <Input type="hidden" />
+          </Form.Item>
+
           <Form.Item
             name="username"
             rules={[{ required: true, message: '¡Por favor, ingresa tu usuario!' }]}
