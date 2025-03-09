@@ -22,21 +22,31 @@ type Config struct {
 
 func LoadConfig() (*Config, error) {
 	if err := godotenv.Load(); err != nil {
-		// Only log as warning since this might be intentional in production
 		fmt.Println("Warning: No .env file found, using environment variables")
 	}
 
 	config := &Config{}
 
 	// Firebase configuration
-	config.Firebase.CredentialsPath = getRequiredEnv("GOOGLE_APPLICATION_CREDENTIALS")
 	config.Firebase.ProjectID = getRequiredEnv("PROJECT_ID")
+
+	// Leer el JSON de Firebase desde la variable de entorno
+	firebaseCreds := getRequiredEnv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+	tempFile, err := os.CreateTemp("", "firebase-creds-*.json")
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temp file: %v", err)
+	}
+	defer tempFile.Close()
+
+	if _, err := tempFile.WriteString(firebaseCreds); err != nil {
+		return nil, fmt.Errorf("failed to write credentials to temp file: %v", err)
+	}
+
+	config.Firebase.CredentialsPath = tempFile.Name()
 
 	// Server configuration
 	config.Server.Port = getEnvWithDefault("PORT", "8080")
 	config.Server.Environment = getEnvWithDefault("GIN_MODE", "debug")
-
-	// Handle CORS origins - allow all origins with "*"
 	config.Server.AllowedOrigins = []string{"*"}
 
 	return config, nil
