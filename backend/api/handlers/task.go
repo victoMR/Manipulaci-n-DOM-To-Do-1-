@@ -1,30 +1,49 @@
+// backend/api/handlers/task.go
 package handlers
 
 import (
+	"context"
+	"log"
 	"net/http"
 	"task-manager-backend/internal/database"
 	"task-manager-backend/internal/models"
 	"time"
 
+	"cloud.google.com/go/firestore"
 	"github.com/gin-gonic/gin"
-	"github.com/gocql/gocql"
+	"github.com/google/uuid"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
-// CreateTaskRequest estructura para la creación de tareas
 type CreateTaskRequest struct {
-	Title       string `json:"title" binding:"required"`
-	Description string `json:"description" binding:"required"`
-	Status      string `json:"status" binding:"required"`
+	Title            string        `json:"title" binding:"required"`
+	Description      string        `json:"description" binding:"required"`
+	Status           string        `json:"status" binding:"required"`
+	TimeUntilFinish  time.Duration `json:"time_until_finish"`
+	RemindMe         bool          `json:"remind_me"`
+	Category         string        `json:"category"`
+	GroupID          *string       `json:"group_id,omitempty"`          // ID del grupo (opcional)
+	AssignedTo       *string       `json:"assigned_to,omitempty"`       // ID del usuario asignado (opcional)
+	ArrCollaborators []string      `json:"arr_collaborators,omitempty"` // IDs de colaboradores (opcional)
 }
 
-// UpdateTaskRequest estructura para actualizar tareas
 type UpdateTaskRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Status      string `json:"status"`
+	Title            string        `json:"title"`
+	Description      string        `json:"description"`
+	Status           string        `json:"status"`
+	TimeUntilFinish  time.Duration `json:"time_until_finish"`
+	RemindMe         bool          `json:"remind_me"`
+	Category         string        `json:"category"`
+	GroupID          *string       `json:"group_id,omitempty"`          // ID del grupo (opcional)
+	AssignedTo       *string       `json:"assigned_to,omitempty"`       // ID del usuario asignado (opcional)
+	ArrCollaborators []string      `json:"arr_collaborators,omitempty"` // IDs de colaboradores (opcional)
 }
 
-// CreateTask maneja la creación de nuevas tareas
+type GetTaskRequest struct {
+	ID string `json:"id"`
+}
+
 func CreateTask(c *gin.Context) {
 	var req CreateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -32,37 +51,42 @@ func CreateTask(c *gin.Context) {
 		return
 	}
 
-	// Obtener el ID del usuario del contexto (establecido por el middleware de autenticación)
+	log.Printf("Datos de la tarea recibidos: %+v", req)
+
 	userID, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
-	// Convertir userID a UUID
-	userUUID, err := gocql.ParseUUID(userID.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+	task := models.Task{
+		ID:               uuid.New().String(),
+		UserID:           userID.(string),
+		Title:            req.Title,
+		Description:      req.Description,
+		Status:           req.Status,
+		TimeUntilFinish:  req.TimeUntilFinish,
+		RemindMe:         req.RemindMe,
+		Category:         req.Category,
+		CreatedAt:        time.Now(),
+		UpdatedAt:        time.Now(),
+		CreatedBy:        userID.(string),      // El usuario que crea la tarea
+		GroupID:          req.GroupID,          // ID del grupo (puede ser nil)
+		AssignedTo:       req.AssignedTo,       // ID del usuario asignado (puede ser nil)
+		ArrCollaborators: req.ArrCollaborators, // IDs de colaboradores
+	}
+
+	// Validate task before saving
+	if !task.Validate() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task data"})
 		return
 	}
 
-	// Crear nueva tarea
-	task := &models.Task{
-		ID:          gocql.TimeUUID(),
-		UserID:      userUUID,
-		Title:       req.Title,
-		Description: req.Description,
-		Status:      req.Status,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
-	}
+	ctx := context.Background()
+	_, err := database.Client.Collection("tasks").Doc(task.ID).Set(ctx, task)
 
-	// Insertar tarea en la base de datos
-	if err := database.Session.Query(`
-		INSERT INTO tasks (id, user_id, title, description, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		task.ID, task.UserID, task.Title, task.Description, task.Status, task.CreatedAt, task.UpdatedAt,
-	).Exec(); err != nil {
+	if err != nil {
+		log.Printf("Error creating task: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error creating task"})
 		return
 	}
@@ -70,7 +94,6 @@ func CreateTask(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"task": task})
 }
 
-// GetUserTasks obtiene todas las tareas del usuario
 func GetUserTasks(c *gin.Context) {
 	userID, exists := c.Get("user_id")
 	if !exists {
@@ -78,43 +101,124 @@ func GetUserTasks(c *gin.Context) {
 		return
 	}
 
-	userUUID, err := gocql.ParseUUID(userID.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+	ctx := context.Background()
+	tasksRef := database.Client.Collection("tasks")
+
+	// Consulta para obtener las tareas donde el usuario es el propietario
+	queryOwner := tasksRef.Where("user_id", "==", userID.(string))
+
+	// Consulta para obtener las tareas donde el usuario es un colaborador
+	queryCollaborator := tasksRef.Where("arr_collaborators", "array-contains", userID.(string))
+
+	// Ejecutar ambas consultas en paralelo
+	docsOwner, errOwner := queryOwner.Documents(ctx).GetAll()
+	docsCollaborator, errCollaborator := queryCollaborator.Documents(ctx).GetAll()
+
+	// Manejar errores
+	if errOwner != nil {
+		log.Printf("Error fetching tasks where user is owner: %v", errOwner)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching tasks where user is owner"})
+		return
+	}
+	if errCollaborator != nil {
+		log.Printf("Error fetching tasks where user is collaborator: %v", errCollaborator)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching tasks where user is collaborator"})
 		return
 	}
 
-	// Consultar tareas del usuario
-	iter := database.Session.Query(`
-		SELECT id, user_id, title, description, status, created_at, updated_at
-		FROM tasks
-		WHERE user_id = ?`,
-		userUUID,
-	).Iter()
-
+	// Combinar los resultados de ambas consultas
 	var tasks []models.Task
-	var task models.Task
-	for iter.Scan(
-		&task.ID,
-		&task.UserID,
-		&task.Title,
-		&task.Description,
-		&task.Status,
-		&task.CreatedAt,
-		&task.UpdatedAt,
-	) {
+
+	// Procesar tareas donde el usuario es el propietario
+	for _, doc := range docsOwner {
+		var task models.Task
+		if err := doc.DataTo(&task); err != nil {
+			log.Printf("Error converting document to task: %v", err)
+			continue
+		}
 		tasks = append(tasks, task)
 	}
 
-	if err := iter.Close(); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching tasks"})
+	// Procesar tareas donde el usuario es un colaborador
+	for _, doc := range docsCollaborator {
+		var task models.Task
+		if err := doc.DataTo(&task); err != nil {
+			log.Printf("Error converting document to task: %v", err)
+			continue
+		}
+		tasks = append(tasks, task)
+	}
+
+	// Eliminar duplicados (en caso de que el usuario sea tanto el propietario como un colaborador)
+	uniqueTasks := removeDuplicateTasks(tasks)
+
+	c.JSON(http.StatusOK, gin.H{"tasks": uniqueTasks})
+}
+
+// GetTaskByID obtiene una tarea por su ID para el usuario actual
+func GetTaskByID(c *gin.Context) {
+	taskID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"tasks": tasks})
+	ctx := context.Background()
+
+	// Obtener tarea por ID y verificar si el usuario es el propietario o un colaborador
+	docRef := database.Client.Collection("tasks").Doc(taskID)
+	doc, err := docRef.Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+		} else {
+			log.Printf("Error fetching task by ID: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching task by ID"})
+		}
+		return
+	}
+
+	var task models.Task
+	if err := doc.DataTo(&task); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error parsing task data"})
+		return
+	}
+
+	// Verificar si el usuario es propietario o colaborador
+	if task.UserID != userID.(string) && !contains(task.ArrCollaborators, userID.(string)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "User is not authorized to access this task"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"task": task})
 }
 
-// UpdateTask actualiza una tarea existente
+// Función para eliminar tareas duplicadas
+func removeDuplicateTasks(tasks []models.Task) []models.Task {
+	seen := make(map[string]bool)
+	var uniqueTasks []models.Task
+
+	for _, task := range tasks {
+		if !seen[task.ID] {
+			seen[task.ID] = true
+			uniqueTasks = append(uniqueTasks, task)
+		}
+	}
+
+	return uniqueTasks
+}
+
+// Función helper para revisar si un string se encuentra en un slice de strings
+func contains(arr []string, str string) bool {
+	for _, s := range arr {
+		if s == str {
+			return true
+		}
+	}
+	return false
+}
+
 func UpdateTask(c *gin.Context) {
 	taskID := c.Param("id")
 	userID, exists := c.Get("user_id")
@@ -129,43 +233,116 @@ func UpdateTask(c *gin.Context) {
 		return
 	}
 
-	taskUUID, err := gocql.ParseUUID(taskID)
+	ctx := context.Background()
+	taskRef := database.Client.Collection("tasks").Doc(taskID)
+
+	// Obtener la tarea existente
+	doc, err := taskRef.Get(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+		if status.Code(err) == codes.NotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching task"})
 		return
 	}
 
-	userUUID, err := gocql.ParseUUID(userID.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-
-	// Verificar que la tarea pertenece al usuario
 	var existingTask models.Task
-	if err := database.Session.Query(`
-		SELECT id FROM tasks WHERE id = ? AND user_id = ? ALLOW FILTERING`,
-		taskUUID, userUUID,
-	).Scan(&existingTask.ID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found or unauthorized"})
+	if err := doc.DataTo(&existingTask); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error parsing task data"})
 		return
 	}
 
-	// Actualizar la tarea
-	if err := database.Session.Query(`
-		UPDATE tasks
-		SET title = ?, description = ?, status = ?, updated_at = ?
-		WHERE id = ? AND user_id = ?`,
-		req.Title, req.Description, req.Status, time.Now(), taskUUID, userUUID,
-	).Exec(); err != nil {
+	// Verificar si el usuario es el propietario o un colaborador
+	isOwner := existingTask.UserID == userID.(string)
+	isCollaborator := contains(existingTask.ArrCollaborators, userID.(string))
+
+	if !isOwner && !isCollaborator {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized to modify this task"})
+		return
+	}
+
+	// Definir los campos que se pueden actualizar
+	var firestoreUpdates []firestore.Update
+	firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "updated_at", Value: time.Now()})
+
+	if isOwner {
+		// El propietario puede modificar todos los campos
+		if req.Title != "" {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "title", Value: req.Title})
+			existingTask.Title = req.Title
+		}
+		if req.Description != "" {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "description", Value: req.Description})
+			existingTask.Description = req.Description
+		}
+		if req.Status != "" {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "status", Value: req.Status})
+			existingTask.Status = req.Status
+		}
+		if req.TimeUntilFinish != 0 {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "time_until_finish", Value: req.TimeUntilFinish})
+			existingTask.TimeUntilFinish = req.TimeUntilFinish
+		}
+		firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "remind_me", Value: req.RemindMe})
+		existingTask.RemindMe = req.RemindMe
+		if req.Category != "" {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "category", Value: req.Category})
+			existingTask.Category = req.Category
+		}
+		if req.GroupID != nil {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "group_id", Value: req.GroupID})
+			existingTask.GroupID = req.GroupID
+		}
+		if req.AssignedTo != nil {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "assigned_to", Value: req.AssignedTo})
+			existingTask.AssignedTo = req.AssignedTo
+		}
+		if req.ArrCollaborators != nil {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "arr_collaborators", Value: req.ArrCollaborators})
+			existingTask.ArrCollaborators = req.ArrCollaborators
+		}
+	} else if isCollaborator {
+		// El colaborador solo puede modificar ciertos campos
+		if req.Title != "" {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "title", Value: req.Title})
+			existingTask.Title = req.Title
+		}
+		if req.Description != "" {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "description", Value: req.Description})
+			existingTask.Description = req.Description
+		}
+		if req.Status != "" {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "status", Value: req.Status})
+			existingTask.Status = req.Status
+		}
+		if req.TimeUntilFinish != 0 {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "time_until_finish", Value: req.TimeUntilFinish})
+			existingTask.TimeUntilFinish = req.TimeUntilFinish
+		}
+		if req.Category != "" {
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "category", Value: req.Category})
+			existingTask.Category = req.Category
+		}
+	}
+
+	// Validar la tarea actualizada
+	if !existingTask.Validate() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task data"})
+		return
+	}
+
+	// Actualizar la tarea en Firestore
+	_, err = taskRef.Update(ctx, firestoreUpdates)
+	if err != nil {
+		log.Printf("Error updating task: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating task"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "Task updated successfully"})
+	c.JSON(http.StatusOK, gin.H{"message": "Task updated successfully", "task": existingTask})
 }
 
-// DeleteTask elimina una tarea
 func DeleteTask(c *gin.Context) {
 	taskID := c.Param("id")
 	userID, exists := c.Get("user_id")
@@ -174,33 +351,34 @@ func DeleteTask(c *gin.Context) {
 		return
 	}
 
-	taskUUID, err := gocql.ParseUUID(taskID)
+	ctx := context.Background()
+	taskRef := database.Client.Collection("tasks").Doc(taskID)
+
+	// Verify task exists and belongs to user
+	doc, err := taskRef.Get(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid task ID"})
+		if status.Code(err) == codes.NotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching task"})
 		return
 	}
 
-	userUUID, err := gocql.ParseUUID(userID.(string))
+	var task models.Task
+	if err := doc.DataTo(&task); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error parsing task data"})
+		return
+	}
+
+	if task.UserID != userID.(string) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Unauthorized to delete this task"})
+		return
+	}
+
+	_, err = taskRef.Delete(ctx)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-
-	// Verificar que la tarea pertenece al usuario antes de eliminarla
-	var existingTask models.Task
-	if err := database.Session.Query(`
-		SELECT id FROM tasks WHERE id = ? AND user_id = ? ALLOW FILTERING`,
-		taskUUID, userUUID,
-	).Scan(&existingTask.ID); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Task not found or unauthorized"})
-		return
-	}
-
-	// Eliminar la tarea
-	if err := database.Session.Query(`
-		DELETE FROM tasks WHERE id = ? AND user_id = ?`,
-		taskUUID, userUUID,
-	).Exec(); err != nil {
+		log.Printf("Error deleting task: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error deleting task"})
 		return
 	}
