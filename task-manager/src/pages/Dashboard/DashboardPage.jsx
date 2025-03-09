@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import {
   Card,
@@ -38,11 +37,9 @@ import {
 } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
 import MainLayout from '../../layouts/MainLayout';
+import api from '../../api/axios';
 
 const { Title, Text } = Typography;
-
-const API_BASE_URL = 'http://localhost:8080/api';
-
 
 // Move formatDate outside of components so it's accessible to all
 const formatDate = (dateString) => {
@@ -104,7 +101,7 @@ const DashboardPage = () => {
         setLoading(false);
         return;
       }
-      const response = await axios.get(`${API_BASE_URL}/tasks`, {
+      const response = await api.get('/api/tasks', {
         headers: { Authorization: `Bearer ${token}` },
       });
 
@@ -176,7 +173,7 @@ const DashboardPage = () => {
 
     try {
       const token = localStorage.getItem('token');
-      await axios.put(`${API_BASE_URL}/tasks/${task.id}`, updatedTask, {
+      await api.put(`/api/tasks/${task.id}`, updatedTask, {
         headers: { Authorization: `Bearer ${token}` },
       });
       message.success('Estado de la tarea actualizado correctamente');

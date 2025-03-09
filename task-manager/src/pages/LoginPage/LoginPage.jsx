@@ -1,13 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Button, Form, Input, message, Card, Row, Col, Typography, Space } from 'antd';
 import { UserOutlined, LockOutlined, LoadingOutlined } from '@ant-design/icons';
-import axios from 'axios';
+import api from '../../api/axios';
 import { useNavigate } from 'react-router-dom';
 
 const { Title, Text } = Typography;
-
-const API_BASE_URL = 'http://localhost:8080/api';
-const API_BASE_URL_HEALTH = 'http://localhost:8080';
 
 const LoginPage = () => {
   const [loading, setLoading] = useState(false);
@@ -24,7 +21,7 @@ const LoginPage = () => {
         password: values.password,
       };
 
-      const response = await axios.post(`${API_BASE_URL}/auth/login`, payload, {
+      const response = await api.post('/api/auth/login', payload, {
         headers: {
           'Content-Type': 'application/json',
         },
@@ -54,7 +51,7 @@ const LoginPage = () => {
 
   const checkHealth = async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL_HEALTH}/health`);
+      const response = await api.get('/health');
       setHealthStatus(response.data);
     } catch (error) {
       console.error('Health check error:', error);

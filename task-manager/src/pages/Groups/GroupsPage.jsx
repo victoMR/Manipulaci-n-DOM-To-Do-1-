@@ -1,9 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Input, Button, List, message, Typography, Card, Row, Col, Modal, Form, Divider, Avatar, Tag, Spin, Empty, Tooltip } from 'antd';
 import { SearchOutlined, UserAddOutlined, UserDeleteOutlined, TeamOutlined, PlusOutlined } from '@ant-design/icons';
-import axios from 'axios';
 import MainLayout from '../../layouts/MainLayout';
-
+import api from '../../api/axios';
 const { Title } = Typography;
 
 const GroupView = () => {
@@ -17,8 +16,6 @@ const GroupView = () => {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [form] = Form.useForm();
 
-  const API_BASE_URL = 'http://localhost:8080/api';
-
   const getAuthHeaders = useCallback(() => ({
     headers: {
       Authorization: `Bearer ${localStorage.getItem('token')}`,
@@ -29,7 +26,7 @@ const GroupView = () => {
   const fetchGroups = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/groups`, getAuthHeaders());
+      const response = await api.get('/api/groups', getAuthHeaders());
 
       if (response.data && response.data.groups) {
         setGroups(response.data.groups);
@@ -55,8 +52,8 @@ const GroupView = () => {
   // Function to create a new group
   const handleCreateGroup = async (values) => {
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/groups`,
+      const response = await api.post(
+        '/api/groups',
         {
           name: values.groupName,
           description: values.description
@@ -88,7 +85,7 @@ const GroupView = () => {
   const fetchGroupMembers = useCallback(async (groupId) => {
     setLoading(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/groups/${groupId}`, getAuthHeaders());
+      const response = await api.get(`/api/groups/${groupId}`, getAuthHeaders());
 
       if (response.data && response.data.members) {
         setGroupMembers(response.data.members);
@@ -114,10 +111,7 @@ const GroupView = () => {
 
     setSearchLoading(true);
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/users/search?email=${encodeURIComponent(searchEmail)}`,
-        getAuthHeaders()
-      );
+      const response = await api.get(`/api/users/search?email=${encodeURIComponent(searchEmail)}`, getAuthHeaders());
 
       if (response.data.users && response.data.users.length > 0) {
         const filteredResults = response.data.users.filter(
@@ -150,11 +144,7 @@ const GroupView = () => {
     }
 
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/groups/${selectedGroup.id}/members/${user.id}`,
-        {},
-        getAuthHeaders()
-      );
+      const response = await api.post(`/api/groups/${selectedGroup.id}/members/${user.id}`, {}, getAuthHeaders());
 
       if (response.status === 200) {
         message.success(`Usuario ${user.username} agregado al grupo`);
@@ -206,6 +196,22 @@ const GroupView = () => {
     }
     return colors[Math.abs(hash) % colors.length];
   }, []);
+
+  function assignAreaToGroup(groupId, areaId) {
+    // Asegúrate de que el grupo y el área existen
+    const group = groups.find(g => g.id === groupId);
+    const area = areas.find(a => a.id === areaId);
+
+    if (group && area) {
+      // Asigna el área al grupo
+      group.areas = group.areas || [];
+      if (!group.areas.includes(areaId)) {
+        group.areas.push(areaId);
+      }
+    } else {
+      console.error("Grupo o área no encontrados");
+    }
+  }
 
   return (
     <MainLayout>

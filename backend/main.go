@@ -144,6 +144,8 @@ func setupRoutes(r *gin.Engine) {
 			tasks.POST("", handlers.CreateTask)
 			tasks.PUT("/:id", handlers.UpdateTask)
 			tasks.DELETE("/:id", handlers.DeleteTask)
+			//FOR GET A TASK BY ID
+			tasks.GET("/:id", handlers.GetTaskByID)
 		}
 		// Group routes
 		groupHandler := handlers.NewGroupHandler()

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import axios from 'axios';
 import MainLayout from '../../layouts/MainLayout';
+import { useNavigate } from 'react-router-dom';
 import {
   Typography,
   List,
@@ -37,12 +37,15 @@ import {
   UserOutlined,
   UserAddOutlined
 } from '@ant-design/icons';
+import api from '../../api/axios';
 
 const { Title, Text } = Typography;
 const { Option } = Select;
 const { confirm } = Modal;
 
 const TasksPage = () => {
+  const navigate = useNavigate();
+
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -73,8 +76,6 @@ const TasksPage = () => {
     'other'
   ];
 
-  const API_BASE_URL = 'http://localhost:8080/api';
-
   const getAuthHeaders = () => ({
     headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
   });
@@ -83,10 +84,7 @@ const TasksPage = () => {
   useEffect(() => {
     const getUserData = async () => {
       try {
-        const response = await axios.get(
-          `${API_BASE_URL}/user`,
-          getAuthHeaders()
-        );
+        const response = await api.get('/api/user', getAuthHeaders());
         setUserData(response.data);
         setUserRole(response.data.role || '');
       } catch (error) {
@@ -109,7 +107,7 @@ const TasksPage = () => {
         message.error('No se encontró token. Por favor, inicia sesión.');
         return;
       }
-      const response = await axios.get(`${API_BASE_URL}/tasks`, getAuthHeaders());
+      const response = await api.get('/api/tasks', getAuthHeaders());
       setTasks(response.data?.tasks ?? []);
     } catch (error) {
       message.error(`Error al obtener tareas: ${error.response?.data?.message || error.message}`);
@@ -121,7 +119,7 @@ const TasksPage = () => {
   const fetchUserGroups = async () => {
     setLoadingGroups(true);
     try {
-      const response = await axios.get(`${API_BASE_URL}/groups`, getAuthHeaders());
+      const response = await api.get('/api/groups', getAuthHeaders());
       setUserGroups(response.data?.groups ?? []);
     } catch (error) {
       console.error('Error fetching user groups:', error);
@@ -135,11 +133,7 @@ const TasksPage = () => {
 
     setLoadingMembers(true);
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/groups/${groupId}`,
-        getAuthHeaders()
-      );
-
+      const response = await api.get(`/api/groups/${groupId}`, getAuthHeaders());
       if (response.data && response.data.members) {
         setGroupMembers(response.data.members);
       } else if (response.data && response.data.group && response.data.group.members) {
@@ -194,10 +188,10 @@ const TasksPage = () => {
 
     try {
       if (editingTask) {
-        await axios.put(`${API_BASE_URL}/tasks/${editingTask.id}`, taskData, getAuthHeaders());
+        await api.put(`/api/tasks/${editingTask.id}`, taskData, getAuthHeaders());
         message.success('¡Tarea actualizada con éxito!');
       } else {
-        await axios.post(`${API_BASE_URL}/tasks`, taskData, getAuthHeaders());
+        await api.post(`/api/tasks`, taskData, getAuthHeaders());
         message.success('¡Tarea creada con éxito!');
       }
       setIsModalVisible(false);
@@ -211,6 +205,10 @@ const TasksPage = () => {
     }
   };
 
+  const showEditPage = (taskId) => {
+    navigate(`/tasks/edit/${taskId}`);
+  };
+
   const showDeleteConfirm = (taskId) => {
     confirm({
       title: '¿Estás seguro de que deseas eliminar esta tarea?',
@@ -219,7 +217,7 @@ const TasksPage = () => {
       onOk: async () => {
         const token = localStorage.getItem('token');
         try {
-          await axios.delete(`${API_BASE_URL}/tasks/${taskId}`, getAuthHeaders());
+          await api.delete(`/api/tasks/${taskId}`, getAuthHeaders());
           message.success('¡Tarea eliminada con éxito!');
           fetchTasks();
         } catch (error) {
@@ -236,11 +234,7 @@ const TasksPage = () => {
       return;
     }
     try {
-      await axios.put(
-        `${API_BASE_URL}/tasks/${task.id}`,
-        { ...task, status: 'completed' },
-        getAuthHeaders()
-      );
+      await api.put(`/api/tasks/${task.id}`, { ...task, status: 'completed' }, getAuthHeaders());
       message.success('¡Tarea marcada como completada!');
       fetchTasks();
     } catch (error) {
@@ -317,8 +311,8 @@ const TasksPage = () => {
 
   const fetchCollaborators = async (collaboratorIds) => {
     try {
-      const response = await axios.post(
-        `${API_BASE_URL}/users/batch`,
+      const response = await api.post(
+        '/api/users/batch',
         { ids: collaboratorIds },
         getAuthHeaders()
       );
@@ -354,8 +348,9 @@ const TasksPage = () => {
 
     setSearchLoading(true);
     try {
-      const response = await axios.get(
-        `${API_BASE_URL}/users/search?email=${encodeURIComponent(searchEmail)}`,
+      const response = await api.post(
+        '/api/users/search',
+        { email: searchEmail },
         getAuthHeaders()
       );
 
@@ -473,7 +468,7 @@ const TasksPage = () => {
                     }}
                     actions={[
                       <Tooltip title="Editar" key={`edit-${task.id}`}>
-                        <Button type="text" icon={<EditOutlined />} onClick={() => showModal(task)} />
+                        <Button type="text" icon={<EditOutlined />} onClick={() => showEditPage(task.id)} />
                       </Tooltip>,
                       <Tooltip title="Eliminar" key={`delete-${task.id}`}>
                         <Button type="text" danger icon={<DeleteOutlined />} onClick={() => showDeleteConfirm(task.id)} />
@@ -498,7 +493,6 @@ const TasksPage = () => {
                       }
                       description={
                         <Space direction="vertical" size="small" style={{ width: '100%' }}>
-                          <Text>{task.description}</Text>
                           <Divider style={{ margin: '8px 0' }} />
                           <Space wrap>
                             <Tag icon={<FolderOutlined />} color="blue">

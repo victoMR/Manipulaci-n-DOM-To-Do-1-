@@ -1,9 +1,8 @@
 import { useState } from 'react';
 import { Button, Form, Input, message, Card, Typography } from 'antd';
-import axios from 'axios';
+import api from '../../api/axios';
 import { useNavigate } from 'react-router-dom';
 
-const API_BASE_URL = 'http://localhost:8080/api';
 
 const RegisterPage = () => {
   const [form] = Form.useForm();
@@ -46,7 +45,7 @@ const RegisterPage = () => {
       // Agregar el campo "role" con el valor "user" (o el que desees)
       const payload = { ...values, role: 'master' }; // Aquí defines el rol
 
-      const response = await axios.post(`${API_BASE_URL}/auth/register`, payload, {
+      const response = await api.post('/api/auth/register', payload, {
         headers: {
           'Content-Type': 'application/json',
         },

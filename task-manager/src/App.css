@@ -27,3 +27,9 @@
     background-color: #40a9ff;
     border-color: #40a9ff;
 }
+
+.wmde-markdown {
+    padding: 16px;
+    border: 1px solid #d9d9d9;
+    border-radius: 4px;
+}

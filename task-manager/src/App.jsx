@@ -6,7 +6,8 @@ import DashboardPage from './pages/Dashboard/DashboardPage';
 import TasksPage from './pages/Tasks/TasksPage';
 import ProfilePage from './pages/Profile/ProfilePage';
 import SettingsPage from './pages/Settings/SettingsPage';
-import GroupsPage from './pages/Groups/GroupsPage';
+import GroupView from './pages/Groups/GroupsPage';
+import EditTaskPage from './pages/Tasks/EditTaskPage';
 
 function App() {
   return (
@@ -16,9 +17,10 @@ function App() {
       <Route path="/register" element={<RegisterPage />} />
       <Route path="/dashboard" element={<DashboardPage />} />
       <Route path="/tasks" element={<TasksPage />} />
+      <Route path="/tasks/edit/:taskId" element={<EditTaskPage />} />
       <Route path="/profile" element={<ProfilePage />} />
       <Route path="/settings" element={<SettingsPage />} />
-      <Route path="/groups" element={<GroupsPage />} />
+      <Route path="/groups" element={<GroupView />} />
     </Routes>
   );
 }

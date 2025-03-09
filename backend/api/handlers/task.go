@@ -40,6 +40,10 @@ type UpdateTaskRequest struct {
 	ArrCollaborators []string      `json:"arr_collaborators,omitempty"` // IDs de colaboradores (opcional)
 }
 
+type GetTaskRequest struct {
+	ID string `json:"id"`
+}
+
 func CreateTask(c *gin.Context) {
 	var req CreateTaskRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -151,6 +155,45 @@ func GetUserTasks(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"tasks": uniqueTasks})
 }
 
+// GetTaskByID obtiene una tarea por su ID para el usuario actual
+func GetTaskByID(c *gin.Context) {
+	taskID := c.Param("id")
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "User ID not found in context"})
+		return
+	}
+
+	ctx := context.Background()
+
+	// Obtener tarea por ID y verificar si el usuario es el propietario o un colaborador
+	docRef := database.Client.Collection("tasks").Doc(taskID)
+	doc, err := docRef.Get(ctx)
+	if err != nil {
+		if status.Code(err) == codes.NotFound {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Task not found"})
+		} else {
+			log.Printf("Error fetching task by ID: %v", err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error fetching task by ID"})
+		}
+		return
+	}
+
+	var task models.Task
+	if err := doc.DataTo(&task); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error parsing task data"})
+		return
+	}
+
+	// Verificar si el usuario es propietario o colaborador
+	if task.UserID != userID.(string) && !contains(task.ArrCollaborators, userID.(string)) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "User is not authorized to access this task"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"task": task})
+}
+
 // Función para eliminar tareas duplicadas
 func removeDuplicateTasks(tasks []models.Task) []models.Task {
 	seen := make(map[string]bool)
@@ -220,63 +263,65 @@ func UpdateTask(c *gin.Context) {
 	}
 
 	// Definir los campos que se pueden actualizar
-	updates := make(map[string]interface{})
-	updates["updated_at"] = time.Now()
+	var firestoreUpdates []firestore.Update
+	firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "updated_at", Value: time.Now()})
 
 	if isOwner {
 		// El propietario puede modificar todos los campos
 		if req.Title != "" {
-			updates["title"] = req.Title
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "title", Value: req.Title})
 			existingTask.Title = req.Title
 		}
 		if req.Description != "" {
-			updates["description"] = req.Description
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "description", Value: req.Description})
 			existingTask.Description = req.Description
 		}
 		if req.Status != "" {
-			updates["status"] = req.Status
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "status", Value: req.Status})
 			existingTask.Status = req.Status
 		}
 		if req.TimeUntilFinish != 0 {
-			updates["time_until_finish"] = req.TimeUntilFinish
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "time_until_finish", Value: req.TimeUntilFinish})
 			existingTask.TimeUntilFinish = req.TimeUntilFinish
 		}
+		firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "remind_me", Value: req.RemindMe})
+		existingTask.RemindMe = req.RemindMe
 		if req.Category != "" {
-			updates["category"] = req.Category
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "category", Value: req.Category})
 			existingTask.Category = req.Category
 		}
 		if req.GroupID != nil {
-			updates["group_id"] = req.GroupID
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "group_id", Value: req.GroupID})
 			existingTask.GroupID = req.GroupID
 		}
 		if req.AssignedTo != nil {
-			updates["assigned_to"] = req.AssignedTo
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "assigned_to", Value: req.AssignedTo})
 			existingTask.AssignedTo = req.AssignedTo
 		}
 		if req.ArrCollaborators != nil {
-			updates["arr_collaborators"] = req.ArrCollaborators
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "arr_collaborators", Value: req.ArrCollaborators})
 			existingTask.ArrCollaborators = req.ArrCollaborators
 		}
 	} else if isCollaborator {
 		// El colaborador solo puede modificar ciertos campos
 		if req.Title != "" {
-			updates["title"] = req.Title
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "title", Value: req.Title})
 			existingTask.Title = req.Title
 		}
 		if req.Description != "" {
-			updates["description"] = req.Description
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "description", Value: req.Description})
 			existingTask.Description = req.Description
 		}
 		if req.Status != "" {
-			updates["status"] = req.Status
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "status", Value: req.Status})
 			existingTask.Status = req.Status
 		}
 		if req.TimeUntilFinish != 0 {
-			updates["time_until_finish"] = req.TimeUntilFinish
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "time_until_finish", Value: req.TimeUntilFinish})
 			existingTask.TimeUntilFinish = req.TimeUntilFinish
 		}
 		if req.Category != "" {
-			updates["category"] = req.Category
+			firestoreUpdates = append(firestoreUpdates, firestore.Update{Path: "category", Value: req.Category})
 			existingTask.Category = req.Category
 		}
 	}
@@ -288,7 +333,7 @@ func UpdateTask(c *gin.Context) {
 	}
 
 	// Actualizar la tarea en Firestore
-	_, err = taskRef.Set(ctx, updates, firestore.MergeAll)
+	_, err = taskRef.Update(ctx, firestoreUpdates)
 	if err != nil {
 		log.Printf("Error updating task: %v", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Error updating task"})
