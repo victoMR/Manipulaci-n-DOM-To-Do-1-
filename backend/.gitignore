@@ -1,6 +1,5 @@
 .env
 
-go.mod
 go.sum
 
 /credentials
