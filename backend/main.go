@@ -52,7 +52,7 @@ func main() {
 
 	// CORS configuration
 	corsConfig := cors.Config{
-		AllowOrigins:     cfg.Server.AllowedOrigins,
+		AllowOrigins:     []string{"https://taskman-lac.vercel.app"}, // Especifica el origen permitido
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization"},
 		ExposeHeaders:    []string{"Content-Length"},
