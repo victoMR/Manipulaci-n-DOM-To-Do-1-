@@ -36,7 +36,10 @@ import {
   useSortable
 } from '@dnd-kit/sortable';
 import { useDroppable } from '@dnd-kit/core';
+import PropTypes from 'prop-types';
 import MainLayout from '../../layouts/MainLayout';
+import MDEditor from '@uiw/react-md-editor';
+import styles from './MarkdownStyles.module.css'; // Importa el archivo CSS Module
 import api from '../../api/axios';
 
 const { Title, Text } = Typography;
@@ -97,7 +100,7 @@ const DashboardPage = () => {
       const token = localStorage.getItem('token');
       if (!token) {
         message.error('No token found. Please log in.');
-        window.location.href = '/login';
+        navigate('/login');
         setLoading(false);
         return;
       }
@@ -120,7 +123,6 @@ const DashboardPage = () => {
         id: String(task.id), // Ensure id is a string
       }));
 
-      //console.log('Processed Tasks:', fetchedTasks);
       setTasks(fetchedTasks);
     } catch (error) {
       message.error(`Failed to fetch tasks: ${error.message}`);
@@ -161,8 +163,6 @@ const DashboardPage = () => {
 
     // Only update if the status has changed
     if (task.status === newStatus) return;
-
-    // console.log(`Moving task "${task.title}" from ${task.status} to ${newStatus}`);
 
     // Create updated task with new status
     const updatedTask = { ...task, status: newStatus };
@@ -214,7 +214,7 @@ const DashboardPage = () => {
               Panel de Control
             </Title>
             <Text type="secondary" style={{ fontSize: '16px' }}>
-              Resumen de tus tareas y actividades {` - ${new Date().toLocaleString('es-ES', { day: '2-digit', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: true })}`}
+              Resumen de tus tareas y actividades {` - ${new Date().toLocaleString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}`}
             </Text>
           </Col>
           <Col>
@@ -371,6 +371,27 @@ const DroppableStatusColumn = ({ status, config, tasks }) => {
   );
 };
 
+DroppableStatusColumn.propTypes = {
+  status: PropTypes.string.isRequired,
+  config: PropTypes.shape({
+    title: PropTypes.string.isRequired,
+    icon: PropTypes.node.isRequired,
+    color: PropTypes.string.isRequired,
+    borderColor: PropTypes.string.isRequired,
+  }).isRequired,
+  tasks: PropTypes.arrayOf(
+    PropTypes.shape({
+      id: PropTypes.string.isRequired,
+      title: PropTypes.string.isRequired,
+      description: PropTypes.string,
+      status: PropTypes.string.isRequired,
+      category: PropTypes.string,
+      remind_me: PropTypes.bool,
+      created_at: PropTypes.string.isRequired,
+    })
+  ).isRequired,
+};
+
 const SortableTask = ({ id, task, status }) => {
   const {
     attributes,
@@ -401,8 +422,22 @@ const SortableTask = ({ id, task, status }) => {
   );
 };
 
+SortableTask.propTypes = {
+  id: PropTypes.string.isRequired,
+  task: PropTypes.shape({
+    id: PropTypes.string.isRequired,
+    title: PropTypes.string.isRequired,
+    description: PropTypes.string,
+    status: PropTypes.string.isRequired,
+    category: PropTypes.string,
+    remind_me: PropTypes.bool,
+    created_at: PropTypes.string.isRequired,
+  }).isRequired,
+  status: PropTypes.string.isRequired,
+};
+
 // Extracted Task Card component for reuse in DragOverlay
-const TaskCard = ({ task, status, isDragging }) => {
+const TaskCard = ({ task, status, isDragging = false }) => {
   return (
     <div
       style={{
@@ -421,18 +456,19 @@ const TaskCard = ({ task, status, isDragging }) => {
         {task.title}
       </Text>
       {task.description && (
-        <Text
-          type="secondary"
+        <div
           style={{
-            display: 'block',
             marginBottom: '8px',
-            whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
           }}
+          className={styles.markdownContainer} // Aplica la clase al contenedor
         >
-          {task.description}
-        </Text>
+          <MDEditor.Markdown source={task.description} />
+          <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '8px' }}>
+            Creada: {formatDate(task.created_at)}
+          </Text>
+        </div>
       )}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px' }}>
         <Tag icon={<FolderOutlined />} color="processing">
@@ -444,11 +480,22 @@ const TaskCard = ({ task, status, isDragging }) => {
           </Tag>
         )}
       </div>
-      <Text type="secondary" style={{ fontSize: '12px', display: 'block', marginTop: '8px' }}>
-        Creada: {formatDate(task.created_at)}
-      </Text>
     </div>
   );
+};
+
+TaskCard.propTypes = {
+  task: PropTypes.shape({
+    id: PropTypes.string.isRequired,
+    title: PropTypes.string.isRequired,
+    description: PropTypes.string,
+    status: PropTypes.string.isRequired,
+    category: PropTypes.string,
+    remind_me: PropTypes.bool,
+    created_at: PropTypes.string.isRequired,
+  }).isRequired,
+  status: PropTypes.string.isRequired,
+  isDragging: PropTypes.bool,
 };
 
 export default DashboardPage;

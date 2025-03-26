@@ -42,8 +42,8 @@ const RegisterPage = () => {
   const onFinish = async (values) => {
     setLoading(true);
     try {
-      // Agregar el campo "role" con el valor "user" (o el que desees)
-      const payload = { ...values, role: 'master' }; // Aquí defines el rol
+
+      const payload = { ...values, role: 'user' };
 
       const response = await api.post('/api/auth/register', payload, {
         headers: {
