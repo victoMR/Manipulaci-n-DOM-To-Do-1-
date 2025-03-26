@@ -63,7 +63,6 @@ const TasksPage = () => {
   const [assignmentType, setAssignmentType] = useState('personal');
   const [userData, setUserData] = useState(null);
   const [collaborators, setCollaborators] = useState([]);
-
   const [searchEmail, setSearchEmail] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -350,6 +349,8 @@ const TasksPage = () => {
     setSearchLoading(true);
     try {
       const response = await api.get(`/api/users/search?email=${encodeURIComponent(searchEmail)}`, getAuthHeaders());
+
+
       if (response.data.users && response.data.users.length > 0) {
         setSearchResults(response.data.users);
       } else {
