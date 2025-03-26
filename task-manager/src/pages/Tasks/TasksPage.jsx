@@ -567,14 +567,14 @@ const TasksPage = () => {
                           )}
 
                           {/* Collaborators */}
-                          {task.collaboratorUsernames && task.collaboratorUsernames.length > 0 && (
+                          {task.arr_collaborators && task.arr_collaborators.length > 0 && (
                             <>
                               <Divider style={{ margin: '8px 0' }} />
                               <Text type="secondary">Colaboradores:</Text>
                               <Space wrap>
-                                {task.collaboratorUsernames.map((username, index) => (
+                                {task.arr_collaborators.map((collaborator, index) => (
                                   <Tag key={index} color="cyan">
-                                    {username}
+                                    {collaborator.username || collaborator}
                                   </Tag>
                                 ))}
                               </Space>
