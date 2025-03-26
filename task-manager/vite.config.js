@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': {
-        target: 'http://localhost:8080', // Backend URL
+        target: 'https://manipulaci-n-dom-to-do-1.onrender.com', // Backend URL
         changeOrigin: true,
         secure: false,
       },
