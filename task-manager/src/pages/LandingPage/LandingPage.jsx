@@ -35,19 +35,7 @@ const LandingPage = () => {
           onClick={() => navigate('/login')}
           style={{ marginTop: '20px', fontWeight: 'bold', padding: '10px 20px', backgroundColor: '#007bff', color: '#fff' }}
         >
-          <a
-            style={{ display: 'inline-flex', alignItems: 'center' }}
-          >
-            <img
-              src="https://cdn3.emoji.gg/emojis/5519_angerypingcircle.gif"
-              width="64px"
-              height="64px"
-              alt="angerypingcircle"
-              style={{ transition: 'transform 0.3s', cursor: 'pointer' }}
-              onMouseOver={e => (e.currentTarget.style.transform = 'scale(1.1)')}
-              onMouseOut={e => (e.currentTarget.style.transform = 'scale(1)')}
-            />
-          </a>
+          Iniciar Sesión
         </Button>
       </Card>
     </div>

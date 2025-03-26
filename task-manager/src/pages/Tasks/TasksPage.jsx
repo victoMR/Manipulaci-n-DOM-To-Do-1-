@@ -63,6 +63,7 @@ const TasksPage = () => {
   const [assignmentType, setAssignmentType] = useState('personal');
   const [userData, setUserData] = useState(null);
   const [collaborators, setCollaborators] = useState([]);
+  const [collaboratorDetails, setCollaboratorDetails] = useState({});
   const [searchEmail, setSearchEmail] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -108,7 +109,45 @@ const TasksPage = () => {
         return;
       }
       const response = await api.get('/api/tasks', getAuthHeaders());
-      setTasks(response.data?.tasks ?? []);
+      const tasksData = response.data?.tasks ?? [];
+
+      // 1. Extraer todos los IDs de colaboradores únicos de todas las tareas
+      const allCollaboratorIds = new Set();
+      tasksData.forEach(task => {
+        if (task.arr_collaborators && task.arr_collaborators.length > 0) {
+          task.arr_collaborators.forEach(id => allCollaboratorIds.add(id));
+        }
+      });
+      const uniqueCollaboratorIds = Array.from(allCollaboratorIds);
+
+      // 2. Obtener los detalles de todos los colaboradores únicos en una sola llamada
+      let collaboratorDetailsMap = {};
+      if (uniqueCollaboratorIds.length > 0) {
+        const collaboratorsResponse = await api.post(
+          '/api/users/batch',
+          { ids: uniqueCollaboratorIds },
+          getAuthHeaders()
+        );
+        if (collaboratorsResponse.data && collaboratorsResponse.data.users) {
+          collaboratorDetailsMap = collaboratorsResponse.data.users.reduce((acc, user) => {
+            acc[user.id] = user.username;
+            return acc;
+          }, {});
+        }
+      }
+
+      // 3. Mapear los usernames de los colaboradores a cada tarea
+      const tasksWithUsernames = tasksData.map(task => {
+        if (task.arr_collaborators && task.arr_collaborators.length > 0) {
+          const collaboratorUsernames = task.arr_collaborators.map(id => collaboratorDetailsMap[id] || 'Usuario no encontrado');
+          return { ...task, collaboratorUsernames };
+        }
+        return task;
+      });
+
+      // 4. Establecer el estado de las tareas con los usernames de los colaboradores
+      setTasks(tasksWithUsernames);
+
     } catch (error) {
       message.error(`Error al obtener tareas: ${error.response?.data?.message || error.message}`);
     } finally {
@@ -348,12 +387,7 @@ const TasksPage = () => {
 
     setSearchLoading(true);
     try {
-      const response = await api.post(
-        '/api/users/search',
-        { email: searchEmail },
-        getAuthHeaders()
-      );
-
+      const response = await api.get(`/api/users/search?email=${encodeURIComponent(searchEmail)}`, getAuthHeaders());
       if (response.data.users && response.data.users.length > 0) {
         setSearchResults(response.data.users);
       } else {
@@ -533,14 +567,14 @@ const TasksPage = () => {
                           )}
 
                           {/* Collaborators */}
-                          {task.arr_collaborators && task.arr_collaborators.length > 0 && (
+                          {task.collaboratorUsernames && task.collaboratorUsernames.length > 0 && (
                             <>
                               <Divider style={{ margin: '8px 0' }} />
                               <Text type="secondary">Colaboradores:</Text>
                               <Space wrap>
-                                {task.arr_collaborators.map((collaborator, index) => (
+                                {task.collaboratorUsernames.map((username, index) => (
                                   <Tag key={index} color="cyan">
-                                    {collaborator.username || collaborator}
+                                    {username}
                                   </Tag>
                                 ))}
                               </Space>
