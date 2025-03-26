@@ -84,7 +84,7 @@ const EditTaskPage = () => {
         if (taskData.arr_collaborators && taskData.arr_collaborators.length > 0) {
           // Fetch collaborator details based on IDs
           const collaboratorsResponse = await api.post(
-            '/api/users/batch',
+            '/api/user',
             { ids: taskData.arr_collaborators },
             getAuthHeaders()
           );
