@@ -20,8 +20,7 @@ import {
   Radio,
   Avatar,
   Row,
-  Col,
-  AutoComplete,
+  Col
 } from 'antd';
 import {
   SaveOutlined,
@@ -29,7 +28,7 @@ import {
   TeamOutlined,
   UserOutlined,
   UserAddOutlined,
-  SearchOutlined,
+  SearchOutlined
 } from '@ant-design/icons';
 import ReactMarkdown from 'react-markdown';
 import MDEditor from '@uiw/react-md-editor';
@@ -38,12 +37,6 @@ import api from '../../api/axios';
 const { Title, Text } = Typography;
 const { Option } = Select;
 
-interface User {
-  id: string;
-  username: string;
-  email: string;
-}
-
 const EditTaskPage = () => {
   const { taskId } = useParams<{ taskId: string }>();
   const navigate = useNavigate();
@@ -51,10 +44,9 @@ const EditTaskPage = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [form] = Form.useForm();
-  const [collaborators, setCollaborators] = useState<User[]>([]);
+  const [collaborators, setCollaborators] = useState<any[]>([]);
   const [mdValue, setMdValue] = useState<string | undefined>("");
-  const [searchTerm, setSearchTerm] = useState('');
-  const [searchResults, setSearchResults] = useState<User[]>([]);
+
 
   const getAuthHeaders = () => ({
     headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
@@ -65,11 +57,12 @@ const EditTaskPage = () => {
       setLoading(true);
       try {
         const response = await api.get(`/api/tasks/${taskId}`, getAuthHeaders());
-        const taskData = response.data.task;
+        const taskData = response.data.task; // Access the task property of the response data
         console.log("Task data fetched:", response.data);
         setTask(taskData);
         setMdValue(taskData.description);
 
+        // Set form values
         form.setFieldsValue({
           title: taskData.title,
           description: taskData.description,
@@ -81,16 +74,8 @@ const EditTaskPage = () => {
         });
         console.log("Form values set:", form.getFieldsValue());
 
-        if (taskData.arr_collaborators && taskData.arr_collaborators.length > 0) {
-          // Fetch collaborator details based on IDs
-          const collaboratorsResponse = await api.post(
-            '/api/users/batch',
-            { ids: taskData.arr_collaborators },
-            getAuthHeaders()
-          );
-          if (collaboratorsResponse.data?.users) {
-            setCollaborators(collaboratorsResponse.data.users);
-          }
+        if (taskData.arr_collaborators) {
+          setCollaborators(taskData.arr_collaborators);
         }
       } catch (error: any) {
         message.error(`Error al cargar la tarea: ${error.response?.data?.message || error.message}`);
@@ -102,41 +87,12 @@ const EditTaskPage = () => {
     fetchTask();
   }, [taskId, form]);
 
-  const handleSearch = async (value: string) => {
-    setSearchTerm(value);
-    if (value) {
-      try {
-        const response = await api.get(`/api/users/search?email=${value}`, getAuthHeaders());
-        setSearchResults(response.data.users || []);
-      } catch (error: any) {
-        message.error(`Error al buscar usuarios: ${error.response?.data?.message || error.message}`);
-        setSearchResults([]);
-      }
-    } else {
-      setSearchResults([]);
-    }
-  };
-
-  const handleAddCollaborator = (user: User) => {
-    if (!collaborators.some(collab => collab.id === user.id)) {
-      setCollaborators([...collaborators, user]);
-      setSearchTerm('');
-      setSearchResults([]);
-    } else {
-      message.warning('Este usuario ya es colaborador.');
-    }
-  };
-
-  const handleRemoveCollaborator = (userId: string) => {
-    setCollaborators(collaborators.filter(collab => collab.id !== userId));
-  };
-
   const handleSaveTask = async (values: any) => {
     setSaving(true);
     const taskData = {
       ...values,
       time_until_finish: values.time_until_finish ? Number(values.time_until_finish * 3600000000000) : 0,
-      arr_collaborators: collaborators.map((c: User) => c.id),
+      arr_collaborators: collaborators.map((c: any) => c.id),
     };
 
     try {
@@ -235,53 +191,6 @@ const EditTaskPage = () => {
                       style={{ width: '100%' }}
                     />
                   </Form.Item>
-                </Card>
-
-                {/* Sección de Colaboradores */}
-                <Card title="Colaboradores">
-                  <AutoComplete
-                    style={{ width: '100%', marginBottom: '16px' }}
-                    placeholder="Buscar usuario por email"
-                    value={searchTerm}
-                    onChange={handleSearch}
-                    options={searchResults.map(user => ({
-                      value: user.email,
-                      label: (
-                        <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          {user.username} ({user.email})
-                        </div>
-                      ),
-                      user, // Attach the user object to the option
-                    }))}
-                    onSelect={(value, option: any) => {
-                      handleAddCollaborator(option.user);
-                    }}
-                  >
-                    <Input.Search
-                      suffix={<UserAddOutlined />}
-                      onSearch={(value) => handleSearch(value)}
-                    />
-                  </AutoComplete>
-
-                  {collaborators.length > 0 ? (
-                    <>
-                      <Divider />
-                      <Space wrap>
-                        {collaborators.map(user => (
-                          <Tag
-                            key={user.id}
-                            closable
-                            onClose={() => handleRemoveCollaborator(user.id)}
-                            icon={<UserOutlined />}
-                          >
-                            {user.username}
-                          </Tag>
-                        ))}
-                      </Space>
-                    </>
-                  ) : (
-                    <Text type="secondary">No hay colaboradores asignados a esta tarea.</Text>
-                  )}
                 </Card>
               </Col>
             </Row>
